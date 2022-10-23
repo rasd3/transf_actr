@@ -10,10 +10,13 @@ dataset_type = 'NuScenesDataset'
 data_root = 'data/nuscenes/'
 input_modality = dict(
     use_lidar=True,
-    use_camera=False,
+    use_camera=True,
     use_radar=False,
     use_map=False,
     use_external=False)
+img_scale = (800, 448)
+num_views = 6
+img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 train_pipeline = [
     dict(
         type='LoadPointsFromFile',
@@ -27,6 +30,7 @@ train_pipeline = [
         use_dim=[0, 1, 2, 3, 4],
     ),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
+    dict(type='LoadMultiViewImageFromFiles'),
     dict(
         type='ObjectSample',
         db_sampler=dict(
@@ -71,15 +75,18 @@ train_pipeline = [
         translation_std=[0.5, 0.5, 0.5]),
     dict(
         type='RandomFlip3D',
-        sync_2d=False,
+        sync_2d=True,
         flip_ratio_bev_horizontal=0.5,
         flip_ratio_bev_vertical=0.5),
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectNameFilter', classes=class_names),
     dict(type='PointShuffle'),
+    dict(type='MyResize', img_scale=img_scale, keep_ratio=True),
+    dict(type='MyNormalize', **img_norm_cfg),
+    dict(type='MyPad', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
-    dict(type='Collect3D', keys=['points', 'gt_bboxes_3d', 'gt_labels_3d'])
+    dict(type='Collect3D', keys=['points', 'img', 'gt_bboxes_3d', 'gt_labels_3d'])
 ]
 test_pipeline = [
     dict(
@@ -95,7 +102,7 @@ test_pipeline = [
     ),
     dict(
         type='MultiScaleFlipAug3D',
-        img_scale=(1333, 800),
+        img_scale=img_scale,
         pts_scale_ratio=1,
         flip=False,
         transforms=[
@@ -105,11 +112,14 @@ test_pipeline = [
                 scale_ratio_range=[1.0, 1.0],
                 translation_std=[0, 0, 0]),
             dict(type='RandomFlip3D'),
+            dict(type='MyResize', img_scale=img_scale, keep_ratio=True),
+            dict(type='MyNormalize', **img_norm_cfg),
+            dict(type='MyPad', size_divisor=32),
             dict(
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points'])
+            dict(type='Collect3D', keys=['points', 'img'])
         ])
 ]
 data = dict(
@@ -120,6 +130,7 @@ data = dict(
         dataset=dict(
             type=dataset_type,
             data_root=data_root,
+            num_views=num_views,
             ann_file=data_root + '/nuscenes_infos_train.pkl',
             load_interval=1,
             pipeline=train_pipeline,
@@ -130,6 +141,7 @@ data = dict(
     val=dict(
         type=dataset_type,
         data_root=data_root,
+        num_views=num_views,
         ann_file=data_root + '/nuscenes_infos_val.pkl',
         load_interval=1,
         pipeline=test_pipeline,
@@ -140,6 +152,7 @@ data = dict(
     test=dict(
         type=dataset_type,
         data_root=data_root,
+        num_views=num_views,
         ann_file=data_root + '/nuscenes_infos_val.pkl',
         load_interval=1,
         pipeline=test_pipeline,
@@ -149,6 +162,21 @@ data = dict(
         box_type_3d='LiDAR'))
 model = dict(
     type='TransFusionDetector',
+    freeze_img=True,
+    img_backbone=dict(
+        type='ResNet',
+        depth=50,
+        num_stages=4,
+        out_indices=(0, 1, 2, 3),
+        frozen_stages=1,
+        norm_cfg=dict(type='BN', requires_grad=True),
+        norm_eval=True,
+        style='pytorch'),
+    img_neck=dict(
+        type='FPN',
+        in_channels=[256, 512, 1024, 2048],
+        out_channels=256,
+        num_outs=5),
     pts_voxel_layer=dict(
         max_num_points=10,
         voxel_size=voxel_size,
@@ -159,14 +187,43 @@ model = dict(
         num_features=5,
     ),
     pts_middle_encoder=dict(
-        type='SparseEncoder',
+        type='SparseEncoderFusion',
         in_channels=5,
         sparse_shape=[41, 1440, 1440],
         output_channels=128,
         order=('conv', 'norm', 'act'),
         encoder_channels=((16, 16, 32), (32, 32, 64), (64, 64, 128), (128, 128)),
         encoder_paddings=((0, 0, 1), (0, 0, 1), (0, 0, [0, 1, 1]), (0, 0)),
-        block_type='basicblock'),
+        block_type='basicblock',
+        # DDA
+        fusion_pos=[3],
+        voxel_size=voxel_size,
+        point_cloud_range=point_cloud_range,
+        fusion_layer=dict(
+            type='ACTR',
+            pfat_cfg=dict(
+                fusion_method='sum',
+                feature_modal='hybrid',
+                hybrid_cfg=dict(
+                    attn_layer='BiGateSum1D_2',
+                    q_method='sum',
+                    q_rep_place=['weight']
+                ),
+                num_bins=80,
+                num_channels=[256],
+                query_num_feat=128,
+                num_enc_layers=2,
+                max_num_ne_voxel=26000,
+                pos_encode_method='depth'),
+            lt_cfg=dict(
+                npoint=2048,
+                radius=2.0,
+                nsample=32,
+                num_layers=2,
+                attn_feat_agg_method='unique',
+                feat_agg_method='replace'
+            ))
+        ),
     pts_backbone=dict(
         type='SECOND',
         in_channels=256,
