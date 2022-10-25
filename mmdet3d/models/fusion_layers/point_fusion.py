@@ -353,6 +353,7 @@ class ACTR(nn.Module):
         pts_feats_n = torch.zeros((B * N, P // 2, C), device=pts.device)
         img_feats_n = torch.zeros((B * N, P // 2, IC), device=pts.device)
         coor_2d_n = torch.zeros((B * N, P // 2, 2), device=pts.device)
+        coor_2d_n_o = torch.zeros((B * N, P // 2, 2), device=pts.device)
         pts_n = torch.zeros((B * N, P // 2, 3), device=pts.device)
         num_points_n = []
         for b in range(B):
@@ -360,14 +361,15 @@ class ACTR(nn.Module):
             for n in range(N):
                 mask = (b_mod == n)
                 mask_n = mask.sum()
-                pts_feats_n[b, :mask_n] = pts_feats[b, :num_points[b]][mask]
-                coor_2d_n[b, :mask_n] = coor_2d[b, :num_points[b], 1:3][mask]
-                pts_n[b, :mask_n] = pts[b, :num_points[b]][mask]
+                pts_feats_n[b*N+n, :mask_n] = pts_feats[b, :num_points[b]][mask]
+                coor_2d_n[b*N+n, :mask_n] = coor_2d[b, :num_points[b], 1:3][mask]
+                coor_2d_n_o[b*N+n, :mask_n] = coor_2d_o[b, :num_points[b], 1:3][mask] // 4
+                pts_n[b*N+n, :mask_n] = pts[b, :num_points[b]][mask]
                 img_coor = coor_2d_o[b, :num_points[b]][mask][:, 1:].to(torch.long) // 4
-                img_feats_n[b, :mask_n] = img_feats[0][b*6+n, :, img_coor[:, 1], img_coor[:, 0]].permute(1, 0)
+                img_feats_n[b*N+n, :mask_n] = img_feats[0][b*6+n, :, img_coor[:, 1], img_coor[:, 0]].permute(1, 0)
                 num_points_n.append(mask_n)
 
-        return pts_feats_n, img_feats_n, coor_2d_n, pts_n, num_points_n
+        return pts_feats_n, img_feats_n, coor_2d_n, coor_2d_n_o, pts_n, num_points_n
 
     def agg_param(self, pts_feat, num_points):
         N = 6
@@ -382,7 +384,7 @@ class ACTR(nn.Module):
                 st += num_points[b * N + n]
         return pts_feat_n
 
-    def forward(self, img_feats, pts, pts_feats, img_metas):
+    def forward(self, img_feats, pts, pts_feats, img_metas, imgs):
         """Forward function.
 
         Args:
@@ -434,8 +436,26 @@ class ACTR(nn.Module):
             coor_2d_b_o[b, :pts[b].shape[0]] = coor_2d_o
             pts_feats_b[b, :pts[b].shape[0]] = pts_feats[b]
 
-        pts_feats_n, img_feats_n, coor_2d_n, pts_n, num_points_n = self.split_param(
+        pts_feats_n, img_feats_n, coor_2d_n, coor_2d_n_o, pts_n, num_points_n = self.split_param(
             pts_feats_b, coor_2d_b, coor_2d_b_o, img_feats, pts_b, num_points, img_meta)
+        if False:
+            import cv2
+            for b in range(batch_size):
+                for i in range(6):
+                    img_feat = img_feats[0][b*6+i].max(0)[0].detach().cpu()
+                    img_feat_norm = ((img_feat - img_feat.min()) / (img_feat.max() - img_feat.min()) * 255).to(torch.uint8).numpy()
+                    img_feat_norm_jet = cv2.applyColorMap(img_feat_norm, cv2.COLORMAP_JET)
+                    cv2.imwrite('./vis/%06d_feat.png' % (b*6+i), img_feat_norm_jet)
+
+                    img_grid = coor_2d_n_o[b*6+i].to(torch.uint8).detach().cpu().numpy()
+                    img_feat_norm[img_grid[:, 1], img_grid[:, 0]] = 255
+                    img_feat_norm_jet = cv2.applyColorMap(img_feat_norm, cv2.COLORMAP_JET)
+                    cv2.imwrite('./vis/%06d_feat_proj.png' % (b*6+i), img_feat_norm_jet)
+
+                    img_o = imgs[b][i].permute(1, 2, 0).cpu()
+                    img_o = ((img_o - img_o.min()) / (img_o.max() - img_o.min()) * 255).to(torch.uint8).numpy()
+                    cv2.imwrite('./vis/%06d_original.png' % (b*6+i), img_o)
+            import pdb; pdb.set_trace()
         enh_feat_n = self.actr(
             v_feat=pts_feats_n,
             grid=coor_2d_n,
@@ -500,8 +520,8 @@ def get_2d_coor_multi(img_meta, points, proj_mat, coord_type, img_scale_factor,
         h, w = img_pad_shape
         grid_o = torch.cat([coor_x, coor_y],
                          dim=1).unsqueeze(0).unsqueeze(0)  # Nx2 -> 1x1xNx2
-        coor_y = coor_y / h * 2 - 1
-        coor_x = coor_x / w * 2 - 1
+        coor_y = coor_y / h
+        coor_x = coor_x / w
         grid = torch.cat([coor_x, coor_y],
                          dim=1).unsqueeze(0).unsqueeze(0)  # Nx2 -> 1x1xNx2
 

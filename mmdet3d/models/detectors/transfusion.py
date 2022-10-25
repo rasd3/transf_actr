@@ -57,7 +57,7 @@ class TransFusionDetector(MVXTwoStageDetector):
             img_feats = self.img_neck(img_feats)
         return img_feats
 
-    def extract_pts_feat(self, pts, img_feats, img_metas):
+    def extract_pts_feat(self, pts, img_feats, img_metas, img):
         """Extract features of points."""
         if not self.with_pts_bbox:
             return None
@@ -66,13 +66,19 @@ class TransFusionDetector(MVXTwoStageDetector):
                                                 )
         batch_size = coors[-1, 0] + 1
         if 'Fusion' in self.pts_middle_encoder.__class__.__name__:
-            x = self.pts_middle_encoder(voxel_features, coors, batch_size, img_feats=img_feats, img_metas=img_metas)
+            x = self.pts_middle_encoder(voxel_features, coors, batch_size, img_feats=img_feats, img_metas=img_metas, img=img)
         else:
             x = self.pts_middle_encoder(voxel_features, coors, batch_size)
         x = self.pts_backbone(x)
         if self.with_pts_neck:
             x = self.pts_neck(x)
         return x
+
+    def extract_feat(self, points, img, img_metas):
+        """Extract features from images and points."""
+        img_feats = self.extract_img_feat(img, img_metas)
+        pts_feats = self.extract_pts_feat(points, img_feats, img_metas, img)
+        return (img_feats, pts_feats)
 
     @torch.no_grad()
     @force_fp32()
@@ -161,7 +167,8 @@ class TransFusionDetector(MVXTwoStageDetector):
                           gt_bboxes_3d,
                           gt_labels_3d,
                           img_metas,
-                          gt_bboxes_ignore=None):
+                          gt_bboxes_ignore=None,
+                          ):
         """Forward function for point cloud branch.
 
         Args:
