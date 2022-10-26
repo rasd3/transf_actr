@@ -411,6 +411,7 @@ class ACTR(nn.Module):
         pts_b = torch.zeros((batch_size, self.actr.max_num_ne_voxel, 3),
                             device=pts_feats.device)
 
+        st = 0
         for b in range(batch_size):
             img_meta = img_metas[b]
             img_scale_factor = (
@@ -435,7 +436,8 @@ class ACTR(nn.Module):
             pts_b[b, :pts[b].shape[0]] = pts[b][:, :3]
             coor_2d_b[b, :pts[b].shape[0]] = coor_2d
             coor_2d_b_o[b, :pts[b].shape[0]] = coor_2d_o
-            pts_feats_b[b, :pts[b].shape[0]] = pts_feats[b]
+            pts_feats_b[b, :pts[b].shape[0]] = pts_feats[st:st+num_points[b]]
+            st += num_points[b]
 
         pts_feats_n, img_feats_n, coor_2d_n, coor_2d_n_o, pts_n, num_points_n = self.split_param(
             pts_feats_b, coor_2d_b, coor_2d_b_o, img_feats, pts_b, num_points, img_meta)
