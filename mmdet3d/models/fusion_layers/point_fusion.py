@@ -350,6 +350,7 @@ class ACTR(nn.Module):
 
         IC = img_feats[0].shape[1]
         B, P, C = pts_feats.shape
+        P = 26000
         pts_feats_n = torch.zeros((B * N, P // 2, C), device=pts.device)
         img_feats_n = torch.zeros((B * N, P // 2, IC), device=pts.device)
         coor_2d_n = torch.zeros((B * N, P // 2, 2), device=pts.device)
