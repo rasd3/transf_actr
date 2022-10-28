@@ -16,6 +16,7 @@ input_modality = dict(
     use_external=False)
 img_scale = (800, 448)
 num_views = 6
+with_info = True
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 train_pipeline = [
     dict(
@@ -33,6 +34,8 @@ train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles'),
     dict(
         type='ObjectSample',
+        with_info=with_info,
+        sample_2d=True,
         db_sampler=dict(
             data_root=data_root,
             info_path=data_root + 'nuscenes_dbinfos_train.pkl',
@@ -125,7 +128,7 @@ test_pipeline = [
 ]
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=6,
+    workers_per_gpu=0,
     train=dict(
         type='CBGSDataset',
         dataset=dict(
@@ -138,7 +141,9 @@ data = dict(
             classes=class_names,
             modality=input_modality,
             test_mode=False,
-            box_type_3d='LiDAR')),
+            box_type_3d='LiDAR',
+            with_info=with_info,
+            )),
     val=dict(
         type=dataset_type,
         data_root=data_root,
@@ -149,7 +154,9 @@ data = dict(
         classes=class_names,
         modality=input_modality,
         test_mode=True,
-        box_type_3d='LiDAR'),
+        box_type_3d='LiDAR',
+        with_info=with_info,
+        ),
     test=dict(
         type=dataset_type,
         data_root=data_root,
@@ -160,7 +167,9 @@ data = dict(
         classes=class_names,
         modality=input_modality,
         test_mode=True,
-        box_type_3d='LiDAR'))
+        box_type_3d='LiDAR',
+        with_info=with_info,
+        ))
 model = dict(
     type='TransFusionDetector',
     freeze_img=True,
@@ -320,7 +329,7 @@ log_config = dict(
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = None
-load_from = './model_zoo/mask_rcnn_r50_fpn_1x_nuim_20201008_195238-e99f5182_img_backbone.pth'
+load_from = None
 resume_from = None
 workflow = [('train', 1)]
 gpu_ids = range(0, 8)

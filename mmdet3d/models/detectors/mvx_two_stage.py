@@ -85,6 +85,7 @@ class MVXTwoStageDetector(Base3DDetector):
         else:
             raise ValueError(
                 f'pretrained should be a dict, got {type(pretrained)}')
+        import pdb; pdb.set_trace()
         if self.with_img_backbone:
             self.img_backbone.init_weights(pretrained=img_pretrained)
         if self.with_pts_backbone:

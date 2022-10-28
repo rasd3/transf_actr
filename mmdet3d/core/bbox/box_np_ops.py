@@ -197,6 +197,10 @@ def rotation_3d_in_axis(points, angles, axis=0):
 
     return np.einsum('aij,jka->aik', points, rot_mat_T)
 
+def rbbox3d_to_corners(rbboxes, origin=[0.5, 0.5, 0.5], axis=2):
+    return center_to_corner_box3d(
+        rbboxes[..., :3], rbboxes[..., 3:6], rbboxes[..., 6], origin, axis=axis
+    )
 
 def center_to_corner_box3d(centers,
                            dims,

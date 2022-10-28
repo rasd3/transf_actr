@@ -2,6 +2,7 @@ import mmcv
 import numpy as np
 import pyquaternion
 import tempfile
+from nuscenes import NuScenes
 from nuscenes.utils.data_classes import Box as NuScenesBox
 from os import path as osp
 
@@ -114,7 +115,9 @@ class NuScenesDataset(Custom3DDataset):
                  filter_empty_gt=True,
                  test_mode=False,
                  eval_version='detection_cvpr_2019',
-                 use_valid_flag=False):
+                 use_valid_flag=False,
+                 with_info=False,
+                 ):
         self.load_interval = load_interval
         self.use_valid_flag = use_valid_flag
         super().__init__(
@@ -141,6 +144,11 @@ class NuScenesDataset(Custom3DDataset):
                 use_map=False,
                 use_external=False,
             )
+        # for mmgt
+        self.with_info = with_info
+        if self.with_info and not test_mode:
+            print('nuscenes_dataset')
+            self.data_info = NuScenes(version='v1.0-trainval', dataroot=data_root, verbose=True)
 
     def get_cat_ids(self, idx):
         """Get category distribution of single scene.
@@ -240,6 +248,9 @@ class NuScenesDataset(Custom3DDataset):
         if not self.test_mode:
             annos = self.get_ann_info(index)
             input_dict['ann_info'] = annos
+
+        if self.with_info:
+            input_dict['data_info'] = self.data_info
 
         return input_dict
 
@@ -379,7 +390,6 @@ class NuScenesDataset(Custom3DDataset):
         Returns:
             dict: Dictionary of evaluation details.
         """
-        from nuscenes import NuScenes
         from nuscenes.eval.detection.evaluate import NuScenesEval
 
         output_dir = osp.join(*osp.split(result_path)[:-1])
@@ -601,3 +611,4 @@ def lidar_nusc_box_to_global(info,
         box.translate(np.array(info['ego2global_translation']))
         box_list.append(box)
     return box_list
+

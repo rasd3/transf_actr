@@ -9,6 +9,18 @@ from mmdet.datasets.pipelines import RandomFlip
 from ..registry import OBJECTSAMPLERS
 from .data_augment_utils import noise_per_object_v3_
 
+import cv2
+from pyquaternion import Quaternion
+
+try:
+    from nuscenes import NuScenes
+    from nuscenes.utils import splits
+    from nuscenes.utils.data_classes import Box
+    from nuscenes.utils.geometry_utils import transform_matrix
+    from nuscenes.eval.detection.config import config_factory
+    from nuscenes.eval.detection.evaluate import NuScenesEval
+except:
+    print("nuScenes devkit not Found!")
 
 @PIPELINES.register_module()
 class RandomFlip3D(RandomFlip):
@@ -127,12 +139,15 @@ class ObjectSample(object):
             Defaults to False.
     """
 
-    def __init__(self, db_sampler, sample_2d=False):
+    def __init__(self, db_sampler, sample_2d=False, with_info=False):
         self.sampler_cfg = db_sampler
         self.sample_2d = sample_2d
         if 'type' not in db_sampler.keys():
             db_sampler['type'] = 'DataBaseSampler'
         self.db_sampler = build_from_cfg(db_sampler, OBJECTSAMPLERS)
+        self.with_info = with_info
+        self.keep_raw = True
+        self.sample_method = 'by_order'
 
     @staticmethod
     def remove_points_in_boxes(points, boxes):
@@ -162,18 +177,64 @@ class ObjectSample(object):
         """
         gt_bboxes_3d = input_dict['gt_bboxes_3d']
         gt_labels_3d = input_dict['gt_labels_3d']
+        if self.with_info:
+            data_info = input_dict["data_info"]
+            cam_images = input_dict['img']
+            cam_orders = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_RIGHT',
+                    'CAM_BACK', 'CAM_BACK_LEFT']
+        else:
+            data_info, cam_images = None, None
+
+        if self.with_info:
+            # Transform points
+            #  sample_coords = box_np_ops.rbbox3d_to_corners(input_dict["gt_bboxes_3d"])
+            sample_coords = input_dict["gt_bboxes_3d"].corners
+            sample_record = data_info.get('sample', input_dict['sample_idx'])
+            pointsensor_token = sample_record['data']['LIDAR_TOP']
+            crop_img_list = [[] for _ in range(len(sample_coords))]
+            # Crop images from raw images
+            for _idx, _key in enumerate(cam_orders):
+                cam_key = _key.upper()
+                camera_token = sample_record['data'][cam_key]
+                cam = data_info.get('sample_data', camera_token)
+                lidar2cam, cam_intrinsic = get_lidar2cam_matrix(data_info, pointsensor_token, cam)
+                points_3d = np.concatenate([sample_coords, np.ones((*sample_coords.shape[:2], 1))], axis=-1)
+                points_cam = (points_3d @ lidar2cam.T).T
+                # Filter useless boxes according to depth
+                cam_mask = (points_cam[2] > 0).all(axis=0)
+                cam_count = cam_mask.nonzero()[0]
+                if cam_mask.sum() == 0:
+                    continue
+                points_cam = points_cam[...,cam_mask].reshape(4, -1)
+                point_img = view_points(points_cam[:3, :], np.array(cam_intrinsic), normalize=True)
+                point_img = point_img.reshape(3, 8, -1)
+                point_img = point_img.transpose()[...,:2]
+                minxy = np.min(point_img, axis=-2)
+                maxxy = np.max(point_img, axis=-2)
+                bbox = np.concatenate([minxy, maxxy], axis=-1)
+                #  bbox = (bbox * res['image_scale']).astype(np.int32)
+                bbox[:,0::2] = np.clip(bbox[:,0::2], a_min=0, a_max=input_dict['img_shape'][1]-1)
+                bbox[:,1::2] = np.clip(bbox[:,1::2], a_min=0, a_max=input_dict['img_shape'][0]-1)
+                cam_mask = (bbox[:,2]-bbox[:,0])*(bbox[:,3]-bbox[:,1])>0
+                if cam_mask.sum() == 0:
+                    continue
+                cam_count = cam_count[cam_mask]
+                bbox = bbox[cam_mask]
+
+                for __idx, _box in enumerate(bbox.astype(np.int)):
+                    crop_img_list[__idx] = cam_images[_idx][_box[1]:_box[3],_box[0]:_box[2]]
 
         # change to float for blending operation
         points = input_dict['points']
         if self.sample_2d:
             img = input_dict['img']
-            gt_bboxes_2d = input_dict['gt_bboxes']
             # Assume for now 3D & 2D bboxes are the same
             sampled_dict = self.db_sampler.sample_all(
                 gt_bboxes_3d.tensor.numpy(),
                 gt_labels_3d,
-                gt_bboxes_2d=gt_bboxes_2d,
-                img=img)
+                img=img,
+                data_info=data_info
+                )
         else:
             sampled_dict = self.db_sampler.sample_all(
                 gt_bboxes_3d.tensor.numpy(), gt_labels_3d, img=None)
@@ -193,6 +254,89 @@ class ObjectSample(object):
             # check the points dimension
             points = points.cat([sampled_points, points])
 
+            if self.with_info:
+                # Transform points
+                #  sample_coords = box_np_ops.rbbox3d_to_corners(sampled_dict['gt_bboxes_3d'])
+                sample_coords = gt_bboxes_3d.corners
+                raw_gt_box_num = len(sampled_dict["gt_bboxes_3d"])
+                sample_crops = crop_img_list + sampled_dict['img_crops']
+                if not self.keep_raw:
+                    points_coords = points[:,:4].copy()
+                    points_coords[:,-1] = 1
+                    point_keep_mask = np.ones(len(points_coords)).astype(np.bool)
+                # Paste image according to sorted strategy
+                for _idx, _key in enumerate(cam_orders):
+                    cam_key = _key.upper()
+                    camera_token = sample_record['data'][cam_key]
+                    cam = data_info.get('sample_data', camera_token)
+                    lidar2cam, cam_intrinsic = get_lidar2cam_matrix(data_info, pointsensor_token, cam)
+                    points_3d = np.concatenate([sample_coords, np.ones((*sample_coords.shape[:2], 1))], axis=-1)
+                    points_cam = (points_3d @ lidar2cam.T).T
+                    depth = points_cam[2]
+                    cam_mask = (depth > 0).all(axis=0)
+                    cam_count = cam_mask.nonzero()[0]
+                    if cam_mask.sum() == 0:
+                        continue
+                    depth = depth.mean(0)[cam_mask]
+                    points_cam = points_cam[...,cam_mask].reshape(4, -1)
+                    point_img = view_points(points_cam[:3, :], np.array(cam_intrinsic), normalize=True)
+                    point_img = point_img.reshape(3, 8, -1)
+                    point_img = point_img.transpose()[...,:2]
+                    minxy = np.min(point_img, axis=-2)
+                    maxxy = np.max(point_img, axis=-2)
+                    bbox = np.concatenate([minxy, maxxy], axis=-1)
+                    #  bbox = (bbox * res['image_scale']).astype(np.int32)
+                    bbox[:,0::2] = np.clip(bbox[:,0::2], a_min=0, a_max=input_dict['img_shape'][1]-1)
+                    bbox[:,1::2] = np.clip(bbox[:,1::2], a_min=0, a_max=input_dict['img_shape'][0]-1)
+                    cam_mask = (bbox[:,2]-bbox[:,0])*(bbox[:,3]-bbox[:,1])>0
+                    if cam_mask.sum() == 0:
+                        continue
+                    depth = depth[cam_mask]
+                    if 'depth' in self.sample_method:
+                        paste_order = depth.argsort()
+                        paste_order = paste_order[::-1]
+                    else:
+                        paste_order = np.arange(len(depth), dtype=np.int64)
+                    cam_count = cam_count[cam_mask][paste_order]
+                    bbox = bbox[cam_mask][paste_order]
+
+                    paste_mask = -255 * np.ones(input_dict['img_shape'][:2], dtype=np.int64)
+                    fg_mask = np.zeros(input_dict['img_shape'][:2], dtype=np.int64)
+                    for _count, _box in zip(cam_count, bbox.astype(np.int)):
+                        img_crop = sample_crops[_count]
+                        if len(img_crop) == 0: continue
+                        if _box[2] - _box[0] < 1 or _box[3] - _box[1] < 0: continue
+                        img_crop = cv2.resize(img_crop, tuple(_box[[2,3]]-_box[[0,1]]))
+                        cam_images[_idx][_box[1]:_box[3],_box[0]:_box[2]] = img_crop
+                        paste_mask[_box[1]:_box[3],_box[0]:_box[2]] = _count
+                        # foreground area of original point cloud in image plane
+                        if _count < raw_gt_box_num:
+                            fg_mask[_box[1]:_box[3],_box[0]:_box[2]] = 1
+                    # calculate modify mask
+                    if not self.keep_raw:
+                        points_cam = (points_coords @ lidar2cam.T).T
+                        cam_mask = points_cam[2] > 0
+                        if cam_mask.sum() == 0:
+                            continue
+                        point_img = view_points(points_cam[:3, :], np.array(cam_intrinsic), normalize=True)
+                        point_img = point_img.transpose()[...,:2]
+                        #  point_img = (point_img * res['image_scale']).astype(np.int64)
+                        cam_mask = (point_img[:,0] > 0) & (point_img[:,0] < input_dict['img_shape'][1]) & \
+                                   (point_img[:,1] > 0) & (point_img[:,1] < input_dict['img_shape'][0]) & cam_mask
+                        point_img = point_img[cam_mask]
+                        new_mask = paste_mask[point_img[:,1], point_img[:,0]]==(points_idx[cam_mask]+raw_gt_box_num)
+                        raw_fg = (fg_mask == 1) & (paste_mask >= 0) & (paste_mask < raw_gt_box_num)
+                        raw_bg = (fg_mask == 0) & (paste_mask < 0)
+                        raw_mask = raw_fg[point_img[:,1], point_img[:,0]] | raw_bg[point_img[:,1], point_img[:,0]]
+                        keep_mask = new_mask | raw_mask
+                        point_keep_mask[cam_mask] = point_keep_mask[cam_mask] & keep_mask
+
+                # Replace the original images
+                input_dict['img'] = cam_images
+                import pdb; pdb.set_trace()
+                # remove overlaped LIDAR points
+                if not self.keep_raw:
+                    points = points[point_keep_mask]
             if self.sample_2d:
                 sampled_gt_bboxes_2d = sampled_dict['gt_bboxes_2d']
                 gt_bboxes_2d = np.concatenate(
@@ -854,3 +998,60 @@ class VoxelBasedPointSampler(object):
         repr_str += ' ' * indent + 'prev_voxel_generator=\n'
         repr_str += f'{_auto_indent(repr(self.prev_voxel_generator), 8)})'
         return repr_str
+
+
+def get_lidar2cam_matrix(nusc, sensor_token, cam):
+    # Get nuScenes lidar2cam and cam_intrinsic matrix
+    pointsensor = nusc.get('sample_data', sensor_token)
+    cs_record = nusc.get('calibrated_sensor', pointsensor['calibrated_sensor_token'])
+    ego_from_lidar = transform_matrix(
+        cs_record["translation"], Quaternion(cs_record["rotation"]), inverse=False
+    )
+
+    # Second step: transform from ego to the global frame.
+    poserecord = nusc.get('ego_pose', pointsensor['ego_pose_token'])
+    global_from_ego = transform_matrix(
+        poserecord["translation"], Quaternion(poserecord["rotation"]), inverse=False
+    )
+
+    lidar2global = np.dot(global_from_ego, ego_from_lidar)
+
+    # Transform from global into the ego vehicle frame for the timestamp of the image.
+    poserecord = nusc.get('ego_pose', cam['ego_pose_token'])
+
+    ego_from_global = transform_matrix(
+        poserecord["translation"], Quaternion(poserecord["rotation"]), inverse=True
+    )
+    
+    # Transform from ego into the camera.
+    cs_record = nusc.get('calibrated_sensor', cam['calibrated_sensor_token'])
+    cam_from_ego = transform_matrix(
+        cs_record["translation"], Quaternion(cs_record["rotation"]), inverse=True
+    )
+    global2cam = np.dot(cam_from_ego, ego_from_global)
+    lidar2cam = np.dot(global2cam, lidar2global)
+    cam_intrinsic = cs_record['camera_intrinsic']
+
+    return lidar2cam, cam_intrinsic
+
+def view_points(points: np.ndarray, view: np.ndarray, normalize: bool) -> np.ndarray:
+    # copied from https://github.com/nutonomy/nuscenes-devkit/
+    # only for debug use
+    assert view.shape[0] <= 4
+    assert view.shape[1] <= 4
+    assert points.shape[0] == 3
+
+    viewpad = np.eye(4)
+    viewpad[:view.shape[0], :view.shape[1]] = view
+
+    nbr_points = points.shape[1]
+
+    # Do operation in homogenous coordinates.
+    points = np.concatenate((points, np.ones((1, nbr_points))))
+    points = np.dot(viewpad, points)
+    points = points[:3, :]
+
+    if normalize:
+        points = points / points[2:3, :].repeat(3, 0).reshape(3, nbr_points)
+
+    return points

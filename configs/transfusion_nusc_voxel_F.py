@@ -320,7 +320,7 @@ log_config = dict(
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = None
-load_from = None
+load_from = './model_zoo/mask_rcnn_r50_fpn_1x_nuim_20201008_195238-e99f5182_img_backbone.pth'
 resume_from = None
 workflow = [('train', 1)]
 gpu_ids = range(0, 8)
