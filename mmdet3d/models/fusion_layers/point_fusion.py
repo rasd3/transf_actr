@@ -351,12 +351,17 @@ class ACTR(nn.Module):
 
         IC = img_feats[0].shape[1]
         B, P, C = pts_feats.shape
-        P = 26000
-        pts_feats_n = torch.zeros((B * N, P // 2, C), device=pts.device)
-        img_feats_n = torch.zeros((B * N, P // 2, IC), device=pts.device)
-        coor_2d_n = torch.zeros((B * N, P // 2, 2), device=pts.device)
-        coor_2d_n_o = torch.zeros((B * N, P // 2, 2), device=pts.device)
-        pts_n = torch.zeros((B * N, P // 2, 3), device=pts.device)
+        max_points = 0
+        for b in range(B):
+            b_mod = coor_2d[b][:, 0][:num_points[b]].to(torch.long)
+            for n in range(N):
+                mask_n = (b_mod == n).sum()
+                max_points = max(max_points, mask_n)
+        pts_feats_n = torch.zeros((B * N, max_points, C), device=pts.device)
+        img_feats_n = torch.zeros((B * N, max_points, IC), device=pts.device)
+        coor_2d_n = torch.zeros((B * N, max_points, 2), device=pts.device)
+        coor_2d_n_o = torch.zeros((B * N, max_points, 2), device=pts.device)
+        pts_n = torch.zeros((B * N, max_points, 3), device=pts.device)
         num_points_n = []
         for b in range(B):
             b_mod = coor_2d[b][:, 0][:num_points[b]].to(torch.long)
@@ -462,7 +467,6 @@ class ACTR(nn.Module):
                     img_o = imgs[b][i].permute(1, 2, 0).cpu()
                     img_o = ((img_o - img_o.min()) / (img_o.max() - img_o.min()) * 255).to(torch.uint8).numpy()
                     cv2.imwrite('./vis/%06d_original.png' % (b*6+i), img_o)
-            import pdb; pdb.set_trace()
         enh_feat_n = self.actr(
             v_feat=pts_feats_n,
             grid=coor_2d_n,
