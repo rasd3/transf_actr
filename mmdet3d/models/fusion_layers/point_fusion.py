@@ -467,6 +467,7 @@ class ACTR(nn.Module):
                     img_o = imgs[b][i].permute(1, 2, 0).cpu()
                     img_o = ((img_o - img_o.min()) / (img_o.max() - img_o.min()) * 255).to(torch.uint8).numpy()
                     cv2.imwrite('./vis/%06d_original.png' % (b*6+i), img_o)
+            breakpoint()
         enh_feat_n = self.actr(
             v_feat=pts_feats_n,
             grid=coor_2d_n,

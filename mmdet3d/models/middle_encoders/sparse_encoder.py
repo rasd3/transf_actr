@@ -351,12 +351,12 @@ class SparseEncoderFusion(nn.Module):
             x = encoder_layer(x)
             if ret_lidar_features:
                 lidar_features.append(x)
-            encode_features.append(x)
             if self.fusion_pos is not None and idx in self.fusion_pos:
                 c_pts = self.coor2pts(x, 0.5)
                 f_feats = self.fusion_layer(img_feats, c_pts, x.features,
                                             img_metas, img)
                 x.features = f_feats
+            encode_features.append(x)
 
         # for detection head
         # [200, 176, 5] -> [200, 176, 2]

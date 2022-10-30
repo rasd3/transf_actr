@@ -5,7 +5,7 @@ class_names = [
 ]
 voxel_size = [0.075, 0.075, 0.2]
 out_size_factor = 8
-evaluation = dict(interval=1)
+evaluation = dict(interval=2)
 dataset_type = 'NuScenesDataset'
 data_root = 'data/nuscenes/'
 input_modality = dict(
@@ -75,7 +75,7 @@ train_pipeline = [
         translation_std=[0.5, 0.5, 0.5]),
     dict(
         type='RandomFlip3D',
-        sync_2d=True,
+        sync_2d=False,
         flip_ratio_bev_horizontal=0.5,
         flip_ratio_bev_vertical=0.5),
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),

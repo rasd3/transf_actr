@@ -93,7 +93,7 @@ class RandomFlip3D(RandomFlip):
                 into result dict.
         """
         # filp 2D image and its annotations
-        super(RandomFlip3D, self).__call__(input_dict)
+        #  super(RandomFlip3D, self).__call__(input_dict)
 
         if self.sync_2d:
             input_dict['pcd_horizontal_flip'] = input_dict['flip']
