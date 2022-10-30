@@ -361,6 +361,7 @@ class ACTR(nn.Module):
         img_feats_n = torch.zeros((B * N, max_points, IC), device=pts.device)
         coor_2d_n = torch.zeros((B * N, max_points, 2), device=pts.device)
         coor_2d_n_o = torch.zeros((B * N, max_points, 2), device=pts.device)
+        pts_mask_n = torch.zeros((B * N, max_points), device=pts.device, dtype=torch.long)
         pts_n = torch.zeros((B * N, max_points, 3), device=pts.device)
         num_points_n = []
         for b in range(B):
@@ -374,21 +375,21 @@ class ACTR(nn.Module):
                 pts_n[b*N+n, :mask_n] = pts[b, :num_points[b]][mask]
                 img_coor = coor_2d_o[b, :num_points[b]][mask][:, 1:].to(torch.long) // 4
                 img_feats_n[b*N+n, :mask_n] = img_feats[0][b*6+n, :, img_coor[:, 1], img_coor[:, 0]].permute(1, 0)
+                pts_mask_n[b*N+n][:mask_n] = mask.nonzero().squeeze()
                 num_points_n.append(mask_n)
 
-        return pts_feats_n, img_feats_n, coor_2d_n, coor_2d_n_o, pts_n, num_points_n
+        return pts_feats_n, img_feats_n, coor_2d_n, coor_2d_n_o, pts_n, num_points_n, pts_mask_n
 
-    def agg_param(self, pts_feat, num_points):
+    def agg_param(self, pts_feat, num_points, pts_mask_n):
         N = 6
         B, C = pts_feat.shape[0] // N, pts_feat.shape[2]
         pts_feat_n = torch.zeros((B, self.actr.max_num_ne_voxel, C),
                                  device=pts_feat.device)
         for b in range(B):
-            st = 0
             for n in range(N):
-                pts_feat_n[b, st:st + num_points[b * N +n]] = \
-                    pts_feat[b * N +n, :num_points[b * N + n]]
-                st += num_points[b * N + n]
+                idx = b * N + n
+                pts_feat_n[b, pts_mask_n[idx][:num_points[idx]]] = \
+                    pts_feat[idx, :num_points[idx]]
         return pts_feat_n
 
     def forward(self, img_feats, pts, pts_feats, img_metas, imgs):
@@ -448,7 +449,7 @@ class ACTR(nn.Module):
             pts_feats_b[b, :pts[b].shape[0]] = pts_feats[st:st+num_points[b]]
             st += num_points[b]
 
-        pts_feats_n, img_feats_n, coor_2d_n, coor_2d_n_o, pts_n, num_points_n = self.split_param(
+        pts_feats_n, img_feats_n, coor_2d_n, coor_2d_n_o, pts_n, num_points_n, pts_mask_n = self.split_param(
             pts_feats_b, coor_2d_b, coor_2d_b_o, img_feats, pts_b, num_points, img_meta)
         if False:
             import cv2
@@ -464,7 +465,10 @@ class ACTR(nn.Module):
                     img_feat_norm_jet = cv2.applyColorMap(img_feat_norm, cv2.COLORMAP_JET)
                     cv2.imwrite('./vis/%06d_feat_proj.png' % (b*6+i), img_feat_norm_jet)
 
-                    img_o = imgs[b][i].permute(1, 2, 0).cpu()
+                    if len(imgs.shape) == 4:
+                        img_o = imgs[b*6+i].permute(1, 2, 0).cpu()
+                    else:
+                        img_o = imgs[b][i].permute(1, 2, 0).cpu()
                     img_o = ((img_o - img_o.min()) / (img_o.max() - img_o.min()) * 255).to(torch.uint8).numpy()
                     cv2.imwrite('./vis/%06d_original.png' % (b*6+i), img_o)
             breakpoint()
@@ -475,7 +479,7 @@ class ACTR(nn.Module):
             lidar_grid=pts_n,
             v_i_feat=img_feats_n,
         )
-        enh_feat = self.agg_param(enh_feat_n, num_points_n)
+        enh_feat = self.agg_param(enh_feat_n, num_points_n, pts_mask_n)
         enh_feat_cat = torch.cat(
             [f[:np] for f, np in zip(enh_feat, num_points)])
 
