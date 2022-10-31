@@ -187,8 +187,8 @@ class ObjectSample(object):
 
         if self.with_info:
             # Transform points
-            #  sample_coords = box_np_ops.rbbox3d_to_corners(input_dict["gt_bboxes_3d"])
             sample_coords = input_dict["gt_bboxes_3d"].corners
+            #  sample_coords = box_np_ops.rbbox3d_to_corners(gt_bboxes_3d.tensor.cpu().numpy())
             sample_record = data_info.get('sample', input_dict['sample_idx'])
             pointsensor_token = sample_record['data']['LIDAR_TOP']
             crop_img_list = [[] for _ in range(len(sample_coords))]
@@ -246,6 +246,7 @@ class ObjectSample(object):
 
             gt_labels_3d = np.concatenate([gt_labels_3d, sampled_gt_labels],
                                           axis=0)
+            # for changed pkl
             gt_bboxes_3d = gt_bboxes_3d.new_box(
                 np.concatenate(
                     [gt_bboxes_3d.tensor.numpy(), sampled_gt_bboxes_3d]))
@@ -256,8 +257,8 @@ class ObjectSample(object):
 
             if self.with_info:
                 # Transform points
-                #  sample_coords = box_np_ops.rbbox3d_to_corners(sampled_dict['gt_bboxes_3d'])
                 sample_coords = gt_bboxes_3d.corners
+                #  sample_coords = box_np_ops.rbbox3d_to_corners(sampled_dict['gt_bboxes_3d'])
                 raw_gt_box_num = len(sampled_dict["gt_bboxes_3d"])
                 sample_crops = crop_img_list + sampled_dict['img_crops']
                 if not self.keep_raw:
@@ -305,6 +306,7 @@ class ObjectSample(object):
                     for _count, _box in zip(cam_count, bbox.astype(np.int)):
                         img_crop = sample_crops[_count]
                         if len(img_crop) == 0: continue
+                        if img_crop.shape[0] == 0 or img_crop.shape[1] == 0: continue
                         if _box[2] - _box[0] < 1 or _box[3] - _box[1] < 0: continue
                         img_crop = cv2.resize(img_crop, tuple(_box[[2,3]]-_box[[0,1]]))
                         cam_images[_idx][_box[1]:_box[3],_box[0]:_box[2]] = img_crop
@@ -333,11 +335,10 @@ class ObjectSample(object):
 
                 # Replace the original images
                 input_dict['img'] = cam_images
-                import pdb; pdb.set_trace()
                 # remove overlaped LIDAR points
                 if not self.keep_raw:
                     points = points[point_keep_mask]
-            if self.sample_2d:
+            if self.sample_2d and False:
                 sampled_gt_bboxes_2d = sampled_dict['gt_bboxes_2d']
                 gt_bboxes_2d = np.concatenate(
                     [gt_bboxes_2d, sampled_gt_bboxes_2d]).astype(np.float32)

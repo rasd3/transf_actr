@@ -38,7 +38,8 @@ train_pipeline = [
         sample_2d=True,
         db_sampler=dict(
             data_root=data_root,
-            info_path=data_root + 'nuscenes_dbinfos_train.pkl',
+            info_path=data_root + 'nuscenes_dbinfos_train_focal.pkl',
+            #  info_path=data_root + 'nuscenes_dbinfos_train.pkl',
             rate=1.0,
             prepare=dict(
                 filter_by_difficulty=[-1],
@@ -78,7 +79,7 @@ train_pipeline = [
         translation_std=[0.5, 0.5, 0.5]),
     dict(
         type='RandomFlip3D',
-        sync_2d=True,
+        sync_2d=False,
         flip_ratio_bev_horizontal=0.5,
         flip_ratio_bev_vertical=0.5),
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
@@ -128,7 +129,7 @@ test_pipeline = [
 ]
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=0,
+    workers_per_gpu=6,
     train=dict(
         type='CBGSDataset',
         dataset=dict(

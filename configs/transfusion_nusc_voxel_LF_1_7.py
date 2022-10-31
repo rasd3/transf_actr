@@ -5,7 +5,7 @@ class_names = [
 ]
 voxel_size = [0.075, 0.075, 0.2]
 out_size_factor = 8
-evaluation = dict(interval=2)
+evaluation = dict(interval=1)
 dataset_type = 'NuScenesDataset'
 data_root = 'data/nuscenes/'
 input_modality = dict(
@@ -31,53 +31,16 @@ train_pipeline = [
     ),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True),
     dict(type='LoadMultiViewImageFromFiles'),
-    dict(
-        type='ObjectSample',
-        db_sampler=dict(
-            data_root=data_root,
-            info_path=data_root + 'nuscenes_dbinfos_train.pkl',
-            rate=1.0,
-            prepare=dict(
-                filter_by_difficulty=[-1],
-                filter_by_min_points=dict(
-                    car=5,
-                    truck=5,
-                    bus=5,
-                    trailer=5,
-                    construction_vehicle=5,
-                    traffic_cone=5,
-                    barrier=5,
-                    motorcycle=5,
-                    bicycle=5,
-                    pedestrian=5)),
-            classes=class_names,
-            sample_groups=dict(
-                car=2,
-                truck=3,
-                construction_vehicle=7,
-                bus=4,
-                trailer=6,
-                barrier=2,
-                motorcycle=6,
-                bicycle=6,
-                pedestrian=2,
-                traffic_cone=2),
-            points_loader=dict(
-                type='LoadPointsFromFile',
-                coord_type='LIDAR',
-                load_dim=5,
-                use_dim=[0, 1, 2, 3, 4],
-            ))),
-    dict(
-        type='GlobalRotScaleTrans',
-        rot_range=[-0.3925 * 2, 0.3925 * 2],
-        scale_ratio_range=[0.9, 1.1],
-        translation_std=[0.5, 0.5, 0.5]),
-    dict(
-        type='RandomFlip3D',
-        sync_2d=False,
-        flip_ratio_bev_horizontal=0.5,
-        flip_ratio_bev_vertical=0.5),
+    # dict(
+    #     type='GlobalRotScaleTrans',
+    #     rot_range=[-0.3925 * 2, 0.3925 * 2],
+    #     scale_ratio_range=[0.9, 1.1],
+    #     translation_std=[0.5, 0.5, 0.5]),
+    # dict(
+    #     type='RandomFlip3D',
+    #     sync_2d=True,
+    #     flip_ratio_bev_horizontal=0.5,
+    #     flip_ratio_bev_vertical=0.5),
     dict(type='PointsRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
     dict(type='ObjectNameFilter', classes=class_names),
@@ -125,7 +88,7 @@ test_pipeline = [
 ]
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=0,
+    workers_per_gpu=6,
     train=dict(
         type='CBGSDataset',
         dataset=dict(
@@ -164,6 +127,12 @@ data = dict(
 model = dict(
     type='TransFusionDetector',
     freeze_img=True,
+    # img_backbone=dict(
+    #     type='DLASeg',
+    #     num_layers=34,
+    #     heads={},
+    #     head_convs=-1,
+    #     ),
     img_backbone=dict(
         type='ResNet',
         depth=50,
@@ -243,6 +212,10 @@ model = dict(
         use_conv_for_no_stride=True),
     pts_bbox_head=dict(
         type='TransFusionHead',
+        fuse_img=True,
+        num_views=num_views,
+        in_channels_img=256,
+        out_size_factor_img=4,
         num_proposals=200,
         auxiliary=True,
         in_channels=256 * 2,
@@ -311,7 +284,7 @@ momentum_config = dict(
     target_ratio=(0.8947368421052632, 1),
     cyclic_times=1,
     step_ratio_up=0.4)
-total_epochs = 20
+total_epochs = 6
 checkpoint_config = dict(interval=1)
 log_config = dict(
     interval=50,
@@ -320,8 +293,9 @@ log_config = dict(
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = None
-load_from = './model_zoo/mask_rcnn_r50_fpn_1x_nuim_20201008_195238-e99f5182_img_backbone.pth'
+load_from = 'checkpoints/transvoxel_L_1_7_20.pth'
 resume_from = None
 workflow = [('train', 1)]
 gpu_ids = range(0, 8)
+freeze_lidar_components = True
 find_unused_parameters = True

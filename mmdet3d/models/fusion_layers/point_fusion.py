@@ -336,6 +336,7 @@ class ACTR(nn.Module):
 
         self.data_version = data_version
         self.data_root = data_root
+        print('point_fusion')
         self.nusc = None
 
     def split_param(self, pts_feats, coor_2d, coor_2d_o, img_feats, pts, num_points, img_meta):
@@ -405,7 +406,6 @@ class ACTR(nn.Module):
             torch.Tensor: Fused features of each point.
         """
         if self.nusc is None:
-            print('point_fusion')
             self.nusc = NuScenes(version=self.data_version, dataroot=self.data_root, verbose=True)
         batch_size = len(pts)
         img_feats = img_feats[:self.actr.num_backbone_outs]

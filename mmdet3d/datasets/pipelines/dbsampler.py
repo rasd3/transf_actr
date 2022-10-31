@@ -41,12 +41,12 @@ class BatchSampler:
                  drop_reminder=False):
         self._sampled_list = sampled_list
         self._indices = np.arange(len(sampled_list))
-        if shuffle:
+        self._shuffle = shuffle
+        if self._shuffle:
             np.random.shuffle(self._indices)
         self._idx = 0
         self._example_num = len(sampled_list)
         self._name = name
-        self._shuffle = shuffle
         self._epoch = epoch
         self._epoch_counter = 0
         self._drop_reminder = drop_reminder
@@ -277,7 +277,10 @@ class DataBaseSampler(object):
 
                 if data_info is not None:
                     # Transform points
-                    sample_record = data_info.get('sample', info['path'].split('/')[-1].split('_')[0])
+                    if 'token' in info:
+                        sample_record = data_info.get('sample', info['token'])
+                    else:
+                        sample_record = data_info.get('sample', info['path'].split('/')[-1].split('_')[0])
                     pointsensor_token = sample_record['data']['LIDAR_TOP']
                     crop_img = []
                     cam_orders = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_RIGHT',
@@ -309,6 +312,8 @@ class DataBaseSampler(object):
 
             gt_labels = np.array([self.cat2label[s['name']] for s in sampled],
                                  dtype=np.long)
+            if 'token' in sampled[0]:
+                sampled_gt_bboxes[:, 2] -= sampled_gt_bboxes[:, 5] / 2
             ret = {
                 'gt_labels_3d':
                 gt_labels,
@@ -342,7 +347,13 @@ class DataBaseSampler(object):
         gt_bboxes_bv = box_np_ops.center_to_corner_box2d(
             gt_bboxes[:, 0:2], gt_bboxes[:, 3:5], gt_bboxes[:, 6])
 
+        if 'token' in sampled[0].keys():
+            # for focal dbinfo pkl
+            for i in range(len(sampled)):
+                sampled[i]['box3d_lidar'] = sampled[i]['box3d_lidar'][[0, 1, 2, 3, 4, 5, 8, 6, 7]]
+
         sp_boxes = np.stack([i['box3d_lidar'] for i in sampled], axis=0)
+
         boxes = np.concatenate([gt_bboxes, sp_boxes], axis=0).copy()
 
         sp_boxes_new = boxes[gt_bboxes.shape[0]:]
