@@ -200,7 +200,7 @@ class DataBaseSampler(object):
                 db_infos[name] = filtered_infos
         return db_infos
 
-    def sample_all(self, gt_bboxes, gt_labels, img=None, data_info=None):
+    def sample_all(self, gt_bboxes, gt_labels, img=None, data_info=None, sample=None):
         """Sampling all categories of bboxes.
 
         Args:
@@ -256,7 +256,8 @@ class DataBaseSampler(object):
         ret = None
         if len(sampled) > 0:
             sampled_gt_bboxes = np.concatenate(sampled_gt_bboxes, axis=0)
-            sample_coords = box_np_ops.rbbox3d_to_corners(sampled_gt_bboxes)
+            #  sample_coords = box_np_ops.rbbox3d_to_corners(sampled_gt_bboxes)
+            sample_coords = np.array(sample.new_box(sampled_gt_bboxes).corners)
             # center = sampled_gt_bboxes[:, 0:3]
 
             # num_sampled = len(sampled)
@@ -347,7 +348,7 @@ class DataBaseSampler(object):
         gt_bboxes_bv = box_np_ops.center_to_corner_box2d(
             gt_bboxes[:, 0:2], gt_bboxes[:, 3:5], gt_bboxes[:, 6])
 
-        if 'token' in sampled[0].keys():
+        if False and 'token' in sampled[0].keys():
             # for focal dbinfo pkl
             for i in range(len(sampled)):
                 sampled[i]['box3d_lidar'] = sampled[i]['box3d_lidar'][[0, 1, 2, 3, 4, 5, 8, 6, 7]]

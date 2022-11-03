@@ -191,7 +191,8 @@ class ObjectSample(object):
             #  sample_coords = box_np_ops.rbbox3d_to_corners(gt_bboxes_3d.tensor.cpu().numpy())
             sample_record = data_info.get('sample', input_dict['sample_idx'])
             pointsensor_token = sample_record['data']['LIDAR_TOP']
-            crop_img_list = [[] for _ in range(len(sample_coords))]
+            #  crop_img_list = [[] for _ in range(len(sample_coords))]
+            crop_img_list = [[np.zeros((1,1,1))] * len(sample_coords) for _ in range(len(cam_orders))]
             # Crop images from raw images
             for _idx, _key in enumerate(cam_orders):
                 cam_key = _key.upper()
@@ -222,22 +223,32 @@ class ObjectSample(object):
                 bbox = bbox[cam_mask]
 
                 for __idx, _box in enumerate(bbox.astype(np.int)):
-                    crop_img_list[__idx] = cam_images[_idx][_box[1]:_box[3],_box[0]:_box[2]]
+                    #  crop_img_list[__idx] = cam_images[_idx][_box[1]:_box[3],_box[0]:_box[2]]
+                    crop_img_list[_idx][cam_count[__idx]] = cam_images[_idx][_box[1]:_box[3],_box[0]:_box[2]]
 
         # change to float for blending operation
         points = input_dict['points']
         if self.sample_2d:
             img = input_dict['img']
             # Assume for now 3D & 2D bboxes are the same
+            #  sampled_dict = self.db_sampler.sample_all(
+                #  gt_bboxes_3d.tensor.numpy(),
+                #  gt_labels_3d,
+                #  img=img,
+                #  data_info=data_info
+                #  )
             sampled_dict = self.db_sampler.sample_all(
                 gt_bboxes_3d.tensor.numpy(),
                 gt_labels_3d,
                 img=img,
-                data_info=data_info
+                data_info=data_info,
+                sample=gt_bboxes_3d
                 )
         else:
+            #  sampled_dict = self.db_sampler.sample_all(
+                #  gt_bboxes_3d.tensor.numpy(), gt_labels_3d, img=None)
             sampled_dict = self.db_sampler.sample_all(
-                gt_bboxes_3d.tensor.numpy(), gt_labels_3d, img=None)
+                gt_bboxes_3d.tensor.numpy(), gt_labels_3d, img=None, sample=gt_bboxes_3d)
 
         if sampled_dict is not None:
             sampled_gt_bboxes_3d = sampled_dict['gt_bboxes_3d']
@@ -260,7 +271,10 @@ class ObjectSample(object):
                 sample_coords = gt_bboxes_3d.corners
                 #  sample_coords = box_np_ops.rbbox3d_to_corners(sampled_dict['gt_bboxes_3d'])
                 raw_gt_box_num = len(sampled_dict["gt_bboxes_3d"])
-                sample_crops = crop_img_list + sampled_dict['img_crops']
+                #  sample_crops = crop_img_list + sampled_dict['img_crops']
+                sample_crops = []
+                for cam_order in range(len(cam_orders)):
+                    sample_crops.append(crop_img_list[cam_order] + sampled_dict['img_crops'])
                 if not self.keep_raw:
                     points_coords = points[:,:4].copy()
                     points_coords[:,-1] = 1
@@ -304,7 +318,8 @@ class ObjectSample(object):
                     paste_mask = -255 * np.ones(input_dict['img_shape'][:2], dtype=np.int64)
                     fg_mask = np.zeros(input_dict['img_shape'][:2], dtype=np.int64)
                     for _count, _box in zip(cam_count, bbox.astype(np.int)):
-                        img_crop = sample_crops[_count]
+                        img_crop = sample_crops[_idx][_count]
+                        #  img_crop = sample_crops[_count]
                         if len(img_crop) == 0: continue
                         if img_crop.shape[0] == 0 or img_crop.shape[1] == 0: continue
                         if _box[2] - _box[0] < 1 or _box[3] - _box[1] < 0: continue
