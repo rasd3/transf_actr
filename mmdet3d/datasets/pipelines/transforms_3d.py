@@ -187,12 +187,13 @@ class ObjectSample(object):
 
         num_gt = len(gt_bboxes_3d)
         crop_img_list = [[np.zeros((1,1,1))] * num_gt for _ in range(len(cam_orders))]
+        if self.with_info:
+            sample_record = data_info.get('sample', input_dict['sample_idx'])
+            pointsensor_token = sample_record['data']['LIDAR_TOP']
         if self.with_info and num_gt:
             # Transform points
             sample_coords = input_dict["gt_bboxes_3d"].corners
             #  sample_coords = box_np_ops.rbbox3d_to_corners(gt_bboxes_3d.tensor.cpu().numpy())
-            sample_record = data_info.get('sample', input_dict['sample_idx'])
-            pointsensor_token = sample_record['data']['LIDAR_TOP']
             #  crop_img_list = [[] for _ in range(len(sample_coords))]
             #  crop_img_list = [[np.zeros((1,1,1))] * len(sample_coords) for _ in range(len(cam_orders))]
             # Crop images from raw images

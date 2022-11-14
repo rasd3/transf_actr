@@ -249,8 +249,8 @@ class NuScenesDataset(Custom3DDataset):
             annos = self.get_ann_info(index)
             input_dict['ann_info'] = annos
 
-        if self.with_info:
-            input_dict['data_info'] = self.data_info
+            if self.with_info:
+                input_dict['data_info'] = self.data_info
 
         return input_dict
 
